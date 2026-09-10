@@ -3,7 +3,25 @@ use serde::{Serialize, Serializer};
 
 use crate::ClientId;
 
-/// Represents an account that can be processed by the engine
+/// Represents an account that has been processed by the engine and can be output as a CSV record
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct AccountOutput {
+    /// Unique client ID
+    pub client: ClientId,
+    /// Available funds (total - held)
+    #[serde(serialize_with = "serialize_decimal")]
+    pub available: Decimal,
+    /// Held funds (not available for withdrawal)
+    #[serde(serialize_with = "serialize_decimal")]
+    pub held: Decimal,
+    /// Total funds (available + held)
+    #[serde(serialize_with = "serialize_decimal")]
+    pub total: Decimal,
+    /// Whether the account is locked (cannot process any more transactions)
+    pub locked: bool,
+}
+
+/// Represents an account that has been processed by the engine
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Account {
     available: Decimal,
@@ -68,24 +86,6 @@ impl Account {
     pub fn total(&self) -> Decimal {
         self.available + self.held
     }
-}
-
-/// Represents an account that can be output as a CSV record
-#[derive(Debug, PartialEq, Eq, Serialize)]
-pub struct AccountOutput {
-    /// Unique client ID
-    pub client: ClientId,
-    /// Available funds (total - held)
-    #[serde(serialize_with = "serialize_decimal")]
-    pub available: Decimal,
-    /// Held funds (not available for withdrawal)
-    #[serde(serialize_with = "serialize_decimal")]
-    pub held: Decimal,
-    /// Total funds (available + held)
-    #[serde(serialize_with = "serialize_decimal")]
-    pub total: Decimal,
-    /// Whether the account is locked (cannot process any more transactions)
-    pub locked: bool,
 }
 
 /// Custom serializer for [`Decimal`] to ensure 4 decimal places are always output

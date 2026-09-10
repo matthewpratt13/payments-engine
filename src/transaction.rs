@@ -6,18 +6,8 @@ use crate::{ClientId, TransactionId};
 
 const DECIMAL_PLACES: u32 = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum TransactionKind {
-    Deposit,
-    Withdrawal,
-    Dispute,
-    Resolve,
-    Chargeback,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransactionState {
+pub enum DepositState {
     Settled,
     Disputed,
     ChargedBack,
@@ -83,6 +73,25 @@ impl TryFrom<InputRecord> for Transaction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TransactionKind {
+    Deposit,
+    Withdrawal,
+    Dispute,
+    Resolve,
+    Chargeback,
+}
+
+/// Represents a deposit that has been processed by the engine
+#[derive(Debug)]
+pub struct Deposit {
+    pub(crate) client: ClientId,
+    pub(crate) amount: Decimal,
+    pub(crate) state: DepositState,
+}
+
+/// Represents a transaction that has been read from a CSV file
 #[derive(Debug, Deserialize)]
 pub struct InputRecord {
     #[serde(rename = "type")]
@@ -90,14 +99,6 @@ pub struct InputRecord {
     client: ClientId,
     tx: TransactionId,
     amount: Option<Decimal>,
-}
-
-/// Represents a transaction that has been processed by the engine
-#[derive(Debug)]
-pub struct TransactionRecord {
-    pub(crate) client: ClientId,
-    pub(crate) amount: Decimal,
-    pub(crate) state: TransactionState,
 }
 
 fn required_amount(

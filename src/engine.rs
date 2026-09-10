@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use rust_decimal::Decimal;
 
 use crate::account::{Account, AccountOutput};
-use crate::transaction::{Transaction, TransactionRecord, TransactionState};
+use crate::transaction::{Deposit, DepositState, Transaction};
 use crate::{ClientId, TransactionId};
 
 /// Engine that processes transactions and maintains the account state
 #[derive(Debug, Default)]
 pub struct Engine {
     accounts: HashMap<ClientId, Account>,
-    deposits: HashMap<TransactionId, TransactionRecord>,
+    deposits: HashMap<TransactionId, Deposit>,
 }
 
 impl Engine {
@@ -18,7 +18,7 @@ impl Engine {
         Engine::default()
     }
 
-    /// Processes a transaction, updating the account state accordingly
+    /// Processes a [`Transaction`], updating the account state accordingly
     pub fn process_tx(&mut self, transaction: Transaction) {
         match transaction {
             Transaction::Deposit { client, tx, amount } => {
@@ -41,11 +41,13 @@ impl Engine {
             .map(|(client_id, acc)| acc.to_output(*client_id))
             .collect();
 
+        // Sort the accounts by client ID for deterministic output (easier for debugging/testing)
         accounts.sort_by_key(|acc| acc.client);
 
         accounts
     }
 
+    /// Processes a deposit, updating the account state accordingly and inserting a [`Deposit`].
     fn process_deposit(&mut self, client_id: ClientId, tx_id: TransactionId, amount: Decimal) {
         if amount <= Decimal::ZERO || self.deposits.contains_key(&tx_id) {
             return;
@@ -55,24 +57,29 @@ impl Engine {
             return;
         }
 
-        self.accounts.entry(client_id).or_default().deposit(amount);
+        // Fetch the account or create a new one for the client if non-existent and deposit
+        let account = self.accounts.entry(client_id).or_default();
+        account.deposit(amount);
 
         self.deposits.insert(
             tx_id,
-            TransactionRecord {
+            Deposit {
                 client: client_id,
                 amount,
-                state: TransactionState::Settled,
+                state: DepositState::Settled,
             },
         );
     }
 
+    /// Processes a withdrawal, updating the account state accordingly.
+    /// Withdrawals are not retained.
     fn process_withdrawal(&mut self, client_id: ClientId, amount: Decimal) {
         if amount <= Decimal::ZERO {
             return;
         }
 
         let Some(account) = self.accounts.get_mut(&client_id) else {
+            // (Do not create an account if non-existent as there is nothing on record to withdraw)
             return;
         };
 
@@ -84,8 +91,7 @@ impl Engine {
     }
 
     fn process_dispute(&mut self, client_id: ClientId, tx_id: TransactionId) {
-        let Some(amount) = self.disputable_amount(client_id, tx_id, TransactionState::Settled)
-        else {
+        let Some(amount) = self.disputable_amount(client_id, tx_id, DepositState::Settled) else {
             return;
         };
 
@@ -96,13 +102,12 @@ impl Engine {
         }
 
         if let Some(deposit) = self.deposits.get_mut(&tx_id) {
-            deposit.state = TransactionState::Disputed;
+            deposit.state = DepositState::Disputed;
         }
     }
 
     fn process_resolve(&mut self, client_id: ClientId, tx_id: TransactionId) {
-        let Some(amount) = self.disputable_amount(client_id, tx_id, TransactionState::Disputed)
-        else {
+        let Some(amount) = self.disputable_amount(client_id, tx_id, DepositState::Disputed) else {
             return;
         };
 
@@ -111,13 +116,12 @@ impl Engine {
         }
 
         if let Some(deposit) = self.deposits.get_mut(&tx_id) {
-            deposit.state = TransactionState::Settled;
+            deposit.state = DepositState::Settled;
         }
     }
 
     fn process_chargeback(&mut self, client_id: ClientId, tx_id: TransactionId) {
-        let Some(amount) = self.disputable_amount(client_id, tx_id, TransactionState::Disputed)
-        else {
+        let Some(amount) = self.disputable_amount(client_id, tx_id, DepositState::Disputed) else {
             return;
         };
 
@@ -126,24 +130,28 @@ impl Engine {
         }
 
         if let Some(deposit) = self.deposits.get_mut(&tx_id) {
-            deposit.state = TransactionState::ChargedBack;
+            deposit.state = DepositState::ChargedBack;
         }
     }
 
+    /// Checks if an account is locked. This occurs when a chargeback has been processed.
     fn account_is_locked(&self, client_id: ClientId) -> bool {
         self.accounts
             .get(&client_id)
             .is_some_and(Account::is_locked)
     }
 
+    /// Returns the amount of a deposit that can be disputed.
+    /// Only deposits in the [`DepositState::Settled`] state can be disputed.
     fn disputable_amount(
         &self,
         client_id: ClientId,
         tx_id: TransactionId,
-        expected_state: TransactionState,
+        expected_state: DepositState,
     ) -> Option<Decimal> {
         let deposit = self.deposits.get(&tx_id)?;
 
+        // Ignore transactions that are not owned by the client or are not in the expected state
         if deposit.client != client_id || deposit.state != expected_state {
             return None;
         }
